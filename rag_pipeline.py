@@ -1,45 +1,58 @@
+import os
 import time
 import chromadb
-import ollama
-from config import MODEL_NAME, CHUNK_SIZE, TOP_K
+from ollama import Client
+from config import MODEL_NAME, CHUNK_SIZE, TOP_K, OLLAMA_HOST
 
+# Initialisation de la base vectorielle locale en mémoire
 chroma_client = chromadb.Client()
 collection = chroma_client.get_or_create_collection(name="corpus_docs")
 
+# Initialisation du client Ollama avec l'URL dynamique
+ollama_client = Client(host=OLLAMA_HOST)
+
 def charger_et_decouper(file_path, chunk_size):
-    """Charge le texte et le découpe en segments."""
+    """Charge le fichier texte et le découpe en segments."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             text = f.read()
     except FileNotFoundError:
+        print(f"Erreur : Le fichier {file_path} est introuvable.")
         return []
     
+    # Découpage par blocs de caractères
     segments = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
     return segments
 
 def initialiser_base(segments):
-    """Calcule les embeddings et stocke les segments dans ChromaDB."""
+    """Calcule les hébergements (embeddings) et stocke les segments dans ChromaDB."""
     if not segments:
         return
     
     documents = segments
     ids = [f"doc_{i}" for i in range(len(segments))]
     
+    # ChromaDB s'occupe des embeddings par défaut
     collection.add(
         documents=documents,
         ids=ids
     )
 
 def interroger_rag(question):
-    """Recherche les segments et interroge le LLM via Ollama."""
+    """Effectue la recherche vectorielle et génère la réponse via le LLM."""
     start_time = time.time()
     
-    results = collection.query(
-        query_texts=[question],
-        n_results=TOP_K
-    )
-    
-    passages = results['documents'][0] if results['documents'] else []
+    # 1. Recherche des segments pertinents
+    try:
+        results = collection.query(
+            query_texts=[question],
+            n_results=TOP_K
+        )
+        passages = results['documents'][0] if results['documents'] else []
+    except Exception as e:
+        passages = []
+        print(f"Erreur lors de la recherche vectorielle : {e}")
+
     contexte = "\n---\n".join(passages)
     
     prompt = f"""Tu es un assistant documentaire. 
@@ -54,13 +67,14 @@ Question : {question}
 Réponse :"""
 
     try:
-        response = ollama.chat(model=MODEL_NAME, messages=[
+        response = ollama_client.chat(model=MODEL_NAME, messages=[
             {'role': 'user', 'content': prompt}
         ])
         reponse_texte = response['message']['content']
         statut = "Succès"
     except Exception as e:
-        reponse_texte = "Erreur : Impossible de joindre Ollama."
+        print(f"Erreur de connexion Ollama sur {OLLAMA_HOST} : {e}")
+        reponse_texte = f"Erreur : Impossible de joindre le modèle Ollama."
         statut = "Échec de connexion"
 
     temps_traitement = round(time.time() - start_time, 2)

@@ -1,42 +1,64 @@
 import streamlit as st
 from config import MODEL_NAME, CHUNK_SIZE, TOP_K, CORPUS_PATH
 from rag_pipeline import charger_et_decouper, initialiser_base, interroger_rag
+st.set_page_config(page_title="Assistant RAG Lite", layout="wide")
 
+# --- Initialisation automatique du RAG au démarrage ---
 @st.cache_resource
-def init_rag():
+def init_application():
     segments = charger_et_decouper(CORPUS_PATH, CHUNK_SIZE)
-    initialiser_base(segments)
-    return True
+    if segments:
+        initialiser_base(segments)
+        return True
+    return False
 
-init_rag()
+rag_pret = init_application()
 
-st.title("Assistant Documentaire Lite RAG")
-st.write(f"Posez une question sur le document. (Modèle: `{MODEL_NAME}` | Segments récupérés: `{TOP_K}`)")
+# --- Interface Utilisateur Streamlit ---
 
-question = st.text_input("Votre question :")
+st.title("Assistant Documentaire Lite RAG 📚")
+st.write("Posez vos questions en langage naturel basées exclusivement sur le corpus documentaire fourni.")
 
-if st.button("Rechercher"):
+if not rag_pret:
+    st.error(f"Le fichier `{CORPUS_PATH}` est manquant à la racine. Veuillez le rajouter pour initialiser l'application.")
+
+# Formulaire de saisie
+question = st.text_input("Quelle est votre question ?")
+
+if st.button("Lancer la recherche", type="primary"):
+    # Gestion d'une question vide
     if not question.strip():
-        st.warning("Veuillez entrer une question valide.")
+        st.warning("Veuillez saisir une question avant de lancer la recherche.")
+    
+    elif not rag_pret:
+        st.error("Impossible de répondre : le corpus n'est pas chargé.")
+        
     else:
-        with st.spinner("Recherche dans le document et génération de la réponse..."):
+        with st.spinner("Analyse du document et traitement par l'IA en cours..."):
+            # Appel du Pipeline
             resultat = interroger_rag(question)
             
-            st.markdown("### Réponse de l'IA")
-            if "Erreur" in resultat["reponse"]:
+            # Affichage de la réponse
+            st.markdown("### 🤖 Réponse générée")
+            if "Erreur :" in resultat["reponse"]:
                 st.error(resultat["reponse"])
             else:
-                st.success(resultat["reponse"])
+                st.info(resultat["reponse"])
             
-            st.markdown("### Métriques de traitement")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Temps de traitement", f"{resultat['temps']} s")
-            col2.metric("Segments récupérés", len(resultat["passages"]))
-            col3.metric("Statut", resultat["statut"])
+            # Affichage des métriques (Suivi MLOps simplifié)
+            st.markdown("### 📊 Métriques & Suivi MLOps")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Modèle utilisé", MODEL_NAME)
+            col2.metric("Temps de traitement", f"{resultat['temps']} s")
+            col3.metric("Segments demandés / reçus", f"{TOP_K} / {len(resultat['passages'])}")
+            col4.metric("Statut de la requête", resultat["statut"])
             
-            with st.expander("Voir les passages utilisés (Contexte)"):
+            # Affichage des passages utilisés
+            st.markdown("### 📄 Passages du corpus consultés")
+            with st.expander("Cliquez pour visualiser les segments de texte extraits"):
                 if resultat["passages"]:
                     for i, passage in enumerate(resultat["passages"]):
-                        st.info(f"**Extrait {i+1} :**\n{passage}")
+                        st.subheader(f"Segment n°{i+1}")
+                        st.code(passage, language="text")
                 else:
-                    st.write("Aucun passage pertinent trouvé.")
+                    st.write("Aucun segment n'a pu être extrait pour cette requête.")
